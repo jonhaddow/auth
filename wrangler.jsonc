@@ -1,0 +1,9 @@
+{
+	"$schema": "https://unpkg.com/wrangler/config-schema.json",
+	"name": "auth",
+	"compatibility_date": "2026-10-03",
+	"main": "src/index.js",
+	"routes": [{ "pattern": "auth.app.haddow.me", "custom_domain": true }],
+	"workers_dev": false,
+	"preview_urls": false
+}
