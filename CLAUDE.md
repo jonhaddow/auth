@@ -6,7 +6,11 @@ An app starts sign-in with that `redirect_uri` and a state of `<subdomain>.<rand
 
 `src/index.js` is the whole Worker.
 
-`src/google.js` is the sign-in code the apps share (no dependencies): `startSignIn` builds Google's sign-in URL with PKCE, and `finishSignIn` swaps the code for an ID token, checks it and returns the verified email. Apps install it from GitHub (`"auth": "github:jonhaddow/auth"`) and import `auth/google`; their lockfile pins the commit, so run `npm update auth` in an app to pick up a change. It's not part of the deployed Worker.
+`src/google.js` is the sign-in code the apps share (no dependencies), imported as `auth/google`. It's not part of the deployed Worker. In an app (with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in its env):
+
+- `npm install github:jonhaddow/auth`. The lockfile pins the commit, so run `npm update auth` to pick up a change.
+- `/auth/google`: `redirect(302, await startSignIn(cookies, env.GOOGLE_CLIENT_ID, url.hostname), { external: ['https://accounts.google.com'] })`. It sets the `oauth_state` and `oauth_verifier` cookies.
+- `/auth/callback`: `const result = await finishSignIn(cookies, url, env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET)`. It clears those cookies, checks the state, swaps the code for an ID token and checks it, then returns `{ email }` (verified) or `{ error: 'expired' | 'google' }`, already logged. The app then checks its allowlist and starts a session.
 
  `npm test`. Pushing to `main` deploys through Workers Builds (`npm test`, then `npx wrangler deploy`).
 

@@ -1,17 +1,17 @@
 export const REDIRECT_URI: string;
 
-export function startSignIn(
-	clientId: string,
-	hostname: string
-): Promise<{ url: string; state: string; verifier: string }>;
+/** The parts of SvelteKit's `Cookies` this uses. */
+type Cookies = {
+	get(name: string): string | undefined;
+	set(name: string, value: string, opts: { path: string } & Record<string, unknown>): void;
+	delete(name: string, opts: { path: string }): void;
+};
 
-export class SignInError extends Error {
-	details?: Record<string, unknown>;
-}
+export function startSignIn(cookies: Cookies, clientId: string, hostname: string): Promise<string>;
 
 export function finishSignIn(
+	cookies: Cookies,
+	url: URL,
 	clientId: string,
-	clientSecret: string,
-	code: string,
-	verifier: string
-): Promise<string>;
+	clientSecret: string
+): Promise<{ email: string; error?: never } | { email?: never; error: 'expired' | 'google' }>;
