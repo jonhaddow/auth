@@ -1,27 +1,32 @@
 // Google sign-in (OAuth 2 with PKCE) for the *.app.haddow.me apps, with no
-// dependencies. Each app keeps its own cookies, allowlist and sessions:
+// dependencies. The state and PKCE verifier live in short-lived cookies; each
+// app keeps its own allowlist and sessions. `cookies` is SvelteKit's.
 //
-//   GET /auth/google:   const { url, state, verifier } = await startSignIn(clientId, url.hostname)
-//                       store state and verifier in short-lived cookies, redirect to url
-//   GET /auth/callback: check ?state= against the cookie, then
-//                       const email = await finishSignIn(clientId, clientSecret, code, verifier)
+//   GET /auth/google:   redirect(302, await startSignIn(cookies, clientId, url.hostname))
+//   GET /auth/callback: const result = await finishSignIn(cookies, url, clientId, clientSecret)
+//                       result.email, or result.error ('expired' or 'google', already logged)
 
 export const REDIRECT_URI = 'https://auth.app.haddow.me/callback';
 const AUTHORIZE = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN = 'https://oauth2.googleapis.com/token';
 const ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
+const STATE = 'oauth_state';
+const VERIFIER = 'oauth_verifier';
+const COOKIE = { path: '/', httpOnly: true, sameSite: 'lax', maxAge: 600 };
 
 const base64url = (bytes) =>
 	btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const random = () => base64url(crypto.getRandomValues(new Uint8Array(32)));
 
-export async function startSignIn(clientId, hostname) {
+// Sets the state and verifier cookies and returns Google's sign-in URL.
+export async function startSignIn(cookies, clientId, hostname) {
 	// The subdomain first, so the shared redirect knows where to send Google's reply.
 	const state = `${hostname.split('.')[0]}.${random()}`;
 	const verifier = random();
 	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-	const url = new URL(AUTHORIZE);
-	for (const [k, v] of Object.entries({
+	cookies.set(STATE, state, COOKIE);
+	cookies.set(VERIFIER, verifier, COOKIE);
+	const query = new URLSearchParams({
 		response_type: 'code',
 		client_id: clientId,
 		redirect_uri: REDIRECT_URI,
@@ -30,12 +35,39 @@ export async function startSignIn(clientId, hostname) {
 		code_challenge: base64url(new Uint8Array(digest)),
 		code_challenge_method: 'S256',
 		prompt: 'select_account'
-	}))
-		url.searchParams.set(k, v);
-	return { url: url.toString(), state, verifier };
+	});
+	return `${AUTHORIZE}?${query}`;
 }
 
-export class SignInError extends Error {
+// Handles Google's reply on /auth/callback: clears the cookies, checks the
+// state, swaps the code for an ID token and checks it. Returns { email } (a
+// verified address) or { error }, logged here without the code or tokens:
+// 'expired' (no or mismatched state, also how a cancelled sign-in arrives) or
+// 'google' (the exchange or the token's checks failed).
+export async function finishSignIn(cookies, url, clientId, clientSecret) {
+	const state = cookies.get(STATE);
+	const verifier = cookies.get(VERIFIER);
+	cookies.delete(STATE, { path: '/' });
+	cookies.delete(VERIFIER, { path: '/' });
+
+	const code = url.searchParams.get('code');
+	if (!code || !state || !verifier || url.searchParams.get('state') !== state) {
+		console.warn('Sign-in failed: missing or mismatched state', {
+			hasCode: !!code,
+			hasStateCookie: !!state,
+			googleError: url.searchParams.get('error')
+		});
+		return { error: 'expired' };
+	}
+	try {
+		return { email: await exchange(clientId, clientSecret, code, verifier) };
+	} catch (e) {
+		console.error('Sign-in failed:', e.message, e.details);
+		return { error: 'google' };
+	}
+}
+
+class SignInError extends Error {
 	constructor(message, details) {
 		super(message);
 		this.name = 'SignInError';
@@ -43,9 +75,7 @@ export class SignInError extends Error {
 	}
 }
 
-// Swaps the code for an ID token and returns its verified email address.
-// Throws SignInError (never including the code or tokens) if anything's off.
-export async function finishSignIn(clientId, clientSecret, code, verifier) {
+async function exchange(clientId, clientSecret, code, verifier) {
 	const res = await fetch(TOKEN, {
 		method: 'POST',
 		headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
