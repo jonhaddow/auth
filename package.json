@@ -5,5 +5,15 @@
 	"scripts": {
 		"test": "node --test",
 		"deploy": "wrangler deploy"
-	}
+	},
+	"exports": {
+		"./google": {
+			"types": "./src/google.d.ts",
+			"default": "./src/google.js"
+		}
+	},
+	"files": [
+		"src/google.js",
+		"src/google.d.ts"
+	]
 }
